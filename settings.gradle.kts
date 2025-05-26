@@ -13,5 +13,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Pray First"
+rootProject.name = "PrayerPath Finder"
 include(":app")

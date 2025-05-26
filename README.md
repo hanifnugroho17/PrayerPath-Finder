@@ -3,7 +3,7 @@
 
 <img align="left" width="100" height="100" src="https://github.com/mhss1/PrayFirst/assets/58703865/3551e461-4263-44ee-a48e-57b7bd1e6075" alt="app icon">
 
-# Pray First | فَصَلِّ
+# PrayerPath Finder
 
 ### Open-source Android app that helps Muslims pray on time and leave their phone encouraging timely prayers
 

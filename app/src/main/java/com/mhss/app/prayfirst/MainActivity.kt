@@ -33,6 +33,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.mhss.app.prayfirst.presentation.Screen
 import com.mhss.app.prayfirst.presentation.main.MainScreen
+import com.mhss.app.prayfirst.presentation.qibla.QiblaScreen
 import com.mhss.app.prayfirst.presentation.settings.SettingsScreen
 import com.mhss.app.prayfirst.ui.theme.PrayFirstTheme
 import dagger.hilt.android.AndroidEntryPoint
@@ -58,6 +59,7 @@ class MainActivity : ComponentActivity() {
                         bottomBar = {
                             val screens = listOf(
                                 Screen.Main,
+                                Screen.Qibla,
                                 Screen.Settings
                             )
                             NavigationBar(
@@ -74,8 +76,8 @@ class MainActivity : ComponentActivity() {
                                                 screen.iconRes
                                         ), contentDescription = null,
                                             modifier = Modifier.size(24.dp)
-                                            )
-                                               },
+                                        )
+                                        },
                                         label = { Text(stringResource(screen.titleRes)) },
                                         selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true,
                                         onClick = {
@@ -103,6 +105,7 @@ class MainActivity : ComponentActivity() {
                                     snackBarHostState.showSnackbar(it)
                                 }
                             } }
+                            composable(Screen.Qibla.route) { QiblaScreen() }
                             composable(Screen.Settings.route) { SettingsScreen() }
                         }
                     }
