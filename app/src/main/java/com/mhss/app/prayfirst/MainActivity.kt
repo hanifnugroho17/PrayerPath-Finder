@@ -34,6 +34,7 @@ import androidx.navigation.compose.rememberNavController
 import com.mhss.app.prayfirst.presentation.Screen
 import com.mhss.app.prayfirst.presentation.main.MainScreen
 import com.mhss.app.prayfirst.presentation.qibla.QiblaScreen
+import com.mhss.app.prayfirst.presentation.mosque.MosqueScreen
 import com.mhss.app.prayfirst.presentation.settings.SettingsScreen
 import com.mhss.app.prayfirst.ui.theme.PrayFirstTheme
 import dagger.hilt.android.AndroidEntryPoint
@@ -60,6 +61,7 @@ class MainActivity : ComponentActivity() {
                             val screens = listOf(
                                 Screen.Main,
                                 Screen.Qibla,
+                                Screen.MosqueFinder,
                                 Screen.Settings
                             )
                             NavigationBar(
@@ -106,6 +108,7 @@ class MainActivity : ComponentActivity() {
                                 }
                             } }
                             composable(Screen.Qibla.route) { QiblaScreen() }
+                            composable(Screen.MosqueFinder.route) { MosqueScreen() }
                             composable(Screen.Settings.route) { SettingsScreen() }
                         }
                     }

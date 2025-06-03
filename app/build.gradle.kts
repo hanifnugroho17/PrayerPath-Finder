@@ -84,6 +84,11 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
     implementation("io.coil-kt:coil-compose:2.6.0")
+    implementation ("com.google.accompanist:accompanist-permissions:0.31.5-beta")
+    implementation ("org.osmdroid:osmdroid-android:6.1.18") // Selalu cek versi terbaru
+    implementation ("com.google.android.gms:play-services-location:21.2.0") // Untuk layanan lokasi Google
+
+
 
     // Hilt
     implementation("com.google.dagger:hilt-android:2.48")
