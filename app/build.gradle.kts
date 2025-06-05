@@ -34,7 +34,7 @@ android {
         debug {
             isMinifyEnabled = false
             applicationIdSuffix = ".debug"
-            resValue("string", "app_name", "PrayFirst Debug")
+            resValue("string", "app_name", "Pray Path Finder")
         }
     }
     compileOptions {
