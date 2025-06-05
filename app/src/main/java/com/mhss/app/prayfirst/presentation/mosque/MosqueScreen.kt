@@ -3,26 +3,30 @@ package com.mhss.app.prayfirst.presentation.mosque
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.drawable.BitmapDrawable
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
 import android.util.Log
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.DrawableCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import com.mhss.app.prayfirst.R
@@ -39,14 +43,12 @@ import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import java.io.IOException
 import java.net.URLEncoder
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.drawable.BitmapDrawable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.ui.Alignment
-import androidx.core.content.ContextCompat
-import androidx.compose.ui.text.style.TextAlign
-import androidx.core.graphics.drawable.DrawableCompat
+
+data class MosqueInfo(
+    val geoPoint: GeoPoint,
+    val name: String,
+    val osmId: Long
+)
 
 data class MosqueScreenState(
     val errorMessage: String? = null,
@@ -58,7 +60,6 @@ data class MosqueScreenState(
     val userMarker: Marker? = null
 )
 
-// Constants
 private object MapConstants {
     const val MARKER_SIZE_DP = 24
     const val LOCATION_UPDATE_INTERVAL = 2000L
@@ -66,8 +67,6 @@ private object MapConstants {
     const val GPS_MIN_DISTANCE = 5f
     const val NETWORK_MIN_DISTANCE = 10f
     const val MOSQUE_SEARCH_RADIUS = 1000
-
-    // Default location (Yogyakarta)
     val DEFAULT_LOCATION = GeoPoint(-7.7956, 110.3695)
 }
 
@@ -77,10 +76,8 @@ fun MosqueScreen() {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    // Initialize OSMDroid configuration
     InitializeOSMDroid(context)
 
-    // Location permissions
     val locationPermissions = rememberMultiplePermissionsState(
         permissions = listOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
@@ -88,7 +85,6 @@ fun MosqueScreen() {
         )
     )
 
-    // Check permissions first
     if (!locationPermissions.allPermissionsGranted) {
         PermissionRequestScreen(
             onRequestPermissions = { locationPermissions.launchMultiplePermissionRequest() }
@@ -96,19 +92,14 @@ fun MosqueScreen() {
         return
     }
 
-    // Main screen state
     var screenState by remember { mutableStateOf(MosqueScreenState()) }
-
-    // Initialize MapView
     val mapView = remember { createMapView(context, screenState.currentZoom) }
 
-    // Location manager and listener
     val locationManager = remember {
         context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
     }
     var locationListener by remember { mutableStateOf<LocationListener?>(null) }
 
-    // Lifecycle management
     MapLifecycleEffect(
         lifecycleOwner = lifecycleOwner,
         mapView = mapView,
@@ -116,15 +107,12 @@ fun MosqueScreen() {
         locationListener = locationListener
     )
 
-    // Main UI
     Box(modifier = Modifier.fillMaxSize()) {
-        // Map view
         MapViewComposable(
             mapView = mapView,
             onMapReady = { screenState = screenState.copy(isMapReady = true) },
         )
 
-        // Location tracking button
         LocationTrackingButton(
             modifier = Modifier.align(Alignment.BottomEnd),
             isTracking = screenState.isTrackingLocation,
@@ -154,7 +142,6 @@ fun MosqueScreen() {
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.align(Alignment.TopCenter)
         ) {
-//            Location info
             screenState.currentLocation?.let { location ->
                 LocationInfoCard(
                     location = location,
@@ -164,15 +151,15 @@ fun MosqueScreen() {
 
             screenState.errorMessage?.let { message ->
                 InfoCard(
-//                    modifier = Modifier.align(Alignment.TopCenter),
                     message = message,
-                    isError = message.contains("Error") || message.contains("Gagal")
+                    isError = message.contains("Error", ignoreCase = true) ||
+                            message.contains("Gagal", ignoreCase = true) ||
+                            message.contains("Tidak", ignoreCase = true)
                 )
             }
         }
     }
 
-    // Load mosques when map is ready
     LaunchedEffect(screenState.isMapReady, screenState.currentLocation) {
         if (screenState.isMapReady) {
             val locationToUse = screenState.currentLocation ?: MapConstants.DEFAULT_LOCATION
@@ -183,7 +170,7 @@ fun MosqueScreen() {
                 mapView.invalidate()
             }
 
-            kotlinx.coroutines.delay(500) // Allow map to render
+            kotlinx.coroutines.delay(500)
 
             loadNearbyMosques(
                 location = locationToUse,
@@ -193,7 +180,7 @@ fun MosqueScreen() {
                 onResult = { mosqueCount, error ->
                     screenState = screenState.copy(
                         errorMessage = error ?: if (mosqueCount == 0) {
-                            "Tidak ada masjid ditemukan dalam radius 1km."
+                            "Tidak ada masjid ditemukan dalam radius ${MapConstants.MOSQUE_SEARCH_RADIUS / 1000}km."
                         } else {
                             "Ditemukan $mosqueCount masjid di sekitar Anda."
                         }
@@ -223,9 +210,10 @@ private fun PermissionRequestScreen(onRequestPermissions: () -> Unit) {
     ) {
         Text(
             text = "Aplikasi membutuhkan izin lokasi untuk menemukan masjid terdekat.",
-            textAlign = TextAlign.Center
+            textAlign = TextAlign.Center,
+            style = MaterialTheme.typography.bodyLarge
         )
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(16.dp))
         Button(onClick = onRequestPermissions) {
             Text("Minta Izin Lokasi")
         }
@@ -242,12 +230,11 @@ private fun MapViewComposable(
             Log.d("MosqueScreen", "AndroidView factory: returning MapView")
             mapView.also {
                 onMapReady()
-                it.onResume()
             }
         },
         modifier = Modifier.fillMaxSize(),
         update = { view ->
-            Log.d("MosqueScreen", "AndroidView update called")
+            Log.d("MosqueScreen", "AndroidView update called, invalidating.")
             view.invalidate()
         }
     )
@@ -266,13 +253,14 @@ private fun LocationTrackingButton(
         containerColor = if (isTracking) {
             MaterialTheme.colorScheme.primary
         } else {
-            MaterialTheme.colorScheme.surface
+            MaterialTheme.colorScheme.surfaceVariant
         }
     ) {
         if (isLoading) {
             CircularProgressIndicator(
                 modifier = Modifier.size(24.dp),
-                strokeWidth = 2.dp
+                strokeWidth = 2.dp,
+                color = if (isTracking) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary
             )
         } else {
             Icon(
@@ -282,7 +270,7 @@ private fun LocationTrackingButton(
                 tint = if (isTracking) {
                     MaterialTheme.colorScheme.onPrimary
                 } else {
-                    MaterialTheme.colorScheme.onSurface
+                    MaterialTheme.colorScheme.primary
                 }
             )
         }
@@ -297,21 +285,26 @@ private fun InfoCard(
 ) {
     Card(
         modifier = modifier
-            .padding(16.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
             .fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
-        )
+            containerColor = if (isError) {
+                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.9f)
+            } else {
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f)
+            }
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Text(
-            text = "Info: $message",
+            text = message,
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(16.dp),
             style = MaterialTheme.typography.bodyMedium,
             color = if (isError) {
-                MaterialTheme.colorScheme.error
+                MaterialTheme.colorScheme.onErrorContainer
             } else {
-                MaterialTheme.colorScheme.onSurface
+                MaterialTheme.colorScheme.onSurfaceVariant
             }
         )
     }
@@ -324,27 +317,27 @@ private fun LocationInfoCard(
     isTracking: Boolean
 ) {
     Card(
-        modifier = modifier.padding(16.dp),
+        modifier = modifier
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .fillMaxWidth(0.8f),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)
-        )
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f)
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
-        Column(modifier = Modifier.padding(8.dp)) {
+        Column(modifier = Modifier.padding(12.dp)) {
             Text(
-                text = "Lokasi: ${String.format("%.4f", location.latitude)}, ${
-                    String.format(
-                        "%.4f",
-                        location.longitude
-                    )
-                }",
+                text = "Lokasi: ${String.format("%.4f", location.latitude)}, ${String.format("%.4f", location.longitude)}",
+                textAlign = TextAlign.Center,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onPrimary
+                color = MaterialTheme.colorScheme.onPrimaryContainer
             )
             if (isTracking) {
                 Text(
                     text = "• Real-time tracking aktif",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onPrimary
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.padding(top = 4.dp)
                 )
             }
         }
@@ -358,32 +351,26 @@ private fun MapLifecycleEffect(
     locationManager: LocationManager,
     locationListener: LocationListener?
 ) {
-    DisposableEffect(lifecycleOwner) {
+    DisposableEffect(lifecycleOwner, mapView) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_RESUME -> {
                     Log.d("MosqueScreen", "MapView onResume")
                     mapView.onResume()
                 }
-
                 Lifecycle.Event.ON_PAUSE -> {
                     Log.d("MosqueScreen", "MapView onPause")
                     mapView.onPause()
                 }
-
                 Lifecycle.Event.ON_DESTROY -> {
-                    Log.d("MosqueScreen", "MapView onDetach")
-                    mapView.onDetach()
-                    cleanupLocationListener(locationManager, locationListener)
                 }
-
                 else -> {}
             }
         }
-
         lifecycleOwner.lifecycle.addObserver(observer)
 
         onDispose {
+            Log.d("MosqueScreen", "MapLifecycleEffect onDispose: Detaching MapView and cleaning listener.")
             lifecycleOwner.lifecycle.removeObserver(observer)
             mapView.onDetach()
             cleanupLocationListener(locationManager, locationListener)
@@ -391,15 +378,14 @@ private fun MapLifecycleEffect(
     }
 }
 
-// Helper functions
-private fun createMapView(context: Context, zoom: Double): MapView {
+private fun createMapView(context: Context, initialZoom: Double): MapView {
     Log.d("MosqueScreen", "Creating MapView instance")
     return MapView(context).apply {
         setTileSource(TileSourceFactory.MAPNIK)
         setMultiTouchControls(true)
-        controller.setZoom(zoom)
-        minimumHeight = 100
-        minimumWidth = 100
+        controller.setZoom(initialZoom)
+        minZoomLevel = 8.0
+        maxZoomLevel = 19.0
     }
 }
 
@@ -410,12 +396,16 @@ private fun cleanupLocationListener(
     locationListener?.let { listener ->
         try {
             locationManager.removeUpdates(listener)
+            Log.d("MosqueScreen", "Location listener removed successfully.")
         } catch (e: SecurityException) {
-            Log.e("MosqueScreen", "Error removing location updates", e)
+            Log.e("MosqueScreen", "SecurityException removing location updates", e)
+        } catch (e: Exception) {
+            Log.e("MosqueScreen", "Exception removing location updates", e)
         }
     }
 }
 
+@SuppressLint("MissingPermission")
 private fun startLocationTracking(
     context: Context,
     locationManager: LocationManager,
@@ -424,7 +414,7 @@ private fun startLocationTracking(
     onStateUpdate: (MosqueScreenState) -> Unit,
     onListenerCreated: (LocationListener) -> Unit
 ) {
-    onStateUpdate(screenState.copy(isLoadingLocation = true))
+    onStateUpdate(screenState.copy(isLoadingLocation = true, errorMessage = null))
 
     LocationTrackingManager.startTracking(
         context = context,
@@ -435,10 +425,12 @@ private fun startLocationTracking(
                 screenState.copy(
                     currentLocation = location,
                     isLoadingLocation = false,
-                    userMarker = newUserMarker
+                    isTrackingLocation = true,
+                    userMarker = newUserMarker,
+                    errorMessage = null
                 )
             )
-            mapView.controller.setCenter(location)
+            mapView.controller.animateTo(location)
             mapView.invalidate()
         },
         onError = { error ->
@@ -452,7 +444,6 @@ private fun startLocationTracking(
         },
         onListenerCreated = { listener ->
             onListenerCreated(listener)
-            onStateUpdate(screenState.copy(isTrackingLocation = true))
         }
     )
 }
@@ -462,16 +453,11 @@ private fun stopLocationTracking(
     locationListener: LocationListener?,
     onStateUpdate: (MosqueScreenState) -> Unit
 ) {
-    locationListener?.let { listener ->
-        try {
-            locationManager.removeUpdates(listener)
-            onStateUpdate(MosqueScreenState(isTrackingLocation = false, isLoadingLocation = false))
-            Log.d("MosqueScreen", "Stopped location tracking")
-        } catch (e: SecurityException) {
-            onStateUpdate(MosqueScreenState(errorMessage = "Gagal menghentikan tracking lokasi"))
-        }
-    }
+    cleanupLocationListener(locationManager, locationListener)
+    onStateUpdate(MosqueScreenState().copy(isTrackingLocation = false, isLoadingLocation = false, errorMessage = "Tracking lokasi dihentikan."))
+    Log.d("MosqueScreen", "Stopped location tracking via UI.")
 }
+
 
 private fun updateUserMarker(
     mapView: MapView,
@@ -479,15 +465,15 @@ private fun updateUserMarker(
     context: Context,
     currentUserMarker: Marker?
 ): Marker {
-    return currentUserMarker?.apply {
-        position = location
-    } ?: createUserMarker(mapView, location, context).also { newMarker ->
-        currentUserMarker?.let { oldMarker ->
-            mapView.overlays.remove(oldMarker)
-        }
-        mapView.overlays.add(0, newMarker)
+    currentUserMarker?.let {
+        mapView.overlays.remove(it)
     }
+
+    val newMarker = createUserMarker(mapView, location, context)
+    mapView.overlays.add(0, newMarker)
+    return newMarker
 }
+
 
 private fun createUserMarker(mapView: MapView, location: GeoPoint, context: Context): Marker {
     return Marker(mapView).apply {
@@ -497,23 +483,31 @@ private fun createUserMarker(mapView: MapView, location: GeoPoint, context: Cont
         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
 
         try {
-            val userDrawable = context.getDrawable(android.R.drawable.ic_menu_mylocation)
+            val userDrawable = ContextCompat.getDrawable(context, android.R.drawable.ic_menu_mylocation)
             userDrawable?.let { drawable ->
-                val blueColor = android.graphics.Color.BLUE
-                val mutableDrawable = DrawableCompat.wrap(drawable.mutate())
+                val blueColor = ContextCompat.getColor(context, R.color.purple_500)
+                val mutableDrawable = DrawableCompat.wrap(drawable.mutate()).mutate()
                 DrawableCompat.setTint(mutableDrawable, blueColor)
 
                 val sizeInPixels =
                     (MapConstants.MARKER_SIZE_DP * context.resources.displayMetrics.density).toInt()
+                val finalSize = if (sizeInPixels > 0) sizeInPixels else MapConstants.MARKER_SIZE_DP
 
-                val resizedDrawable = drawable.mutate()
-                resizedDrawable.setBounds(0, 0, sizeInPixels, sizeInPixels)
-                icon = resizedDrawable
+                val bitmap = Bitmap.createBitmap(finalSize, finalSize, Bitmap.Config.ARGB_8888)
+                val canvas = Canvas(bitmap)
+                mutableDrawable.setBounds(0, 0, canvas.width, canvas.height)
+                mutableDrawable.draw(canvas)
+                icon = BitmapDrawable(context.resources, bitmap)
 
-                Log.d("MarkerDebug", "User marker size set to: ${sizeInPixels}px")
+                Log.d("MarkerDebug", "User marker size set to: ${finalSize}px")
             }
         } catch (e: Exception) {
             Log.w("MosqueScreen", "Could not load user location icon", e)
+            try {
+                icon = ContextCompat.getDrawable(context, org.osmdroid.library.R.drawable.person)
+            } catch (ex: Exception) {
+                Log.e("MarkerDebug", "Failed to set fallback user icon", ex)
+            }
         }
     }
 }
@@ -528,27 +522,25 @@ private fun loadNearbyMosques(
     MosqueSearchManager.searchNearby(
         location = location,
         radius = MapConstants.MOSQUE_SEARCH_RADIUS,
-        onSuccess = { mosques ->
-            Log.d("MosqueScreen", "Mosques found: ${mosques.size}")
+        onSuccess = { mosquesInfo ->
+            Log.d("MosqueScreen", "Mosques found: ${mosquesInfo.size}")
 
-            // Clear all markers except user marker
-            val overlaysToKeep = mutableListOf<org.osmdroid.views.overlay.Overlay>()
-            userMarker?.let { overlaysToKeep.add(it) }
+            val overlaysToRemove = mapView.overlays.filterNot { it == userMarker }
+            mapView.overlays.removeAll(overlaysToRemove)
 
-            mapView.overlays.clear()
-            mapView.overlays.addAll(overlaysToKeep)
-
-            // Add mosque markers
-            mosques.forEach { mosqueLocation ->
-                val marker = createMosqueMarker(mapView, mosqueLocation, location, context)
+            mosquesInfo.forEach { mosqueInfo ->
+                val marker = createMosqueMarker(mapView, mosqueInfo, location, context)
                 mapView.overlays.add(marker)
             }
 
             mapView.invalidate()
-            onResult(mosques.size, null)
+            onResult(mosquesInfo.size, null)
         },
         onError = { error ->
             Log.e("MosqueScreen", "Error fetching mosques: $error")
+            val overlaysToRemove = mapView.overlays.filterNot { it == userMarker }
+            mapView.overlays.removeAll(overlaysToRemove)
+            mapView.invalidate()
             onResult(0, error)
         }
     )
@@ -556,54 +548,48 @@ private fun loadNearbyMosques(
 
 private fun createMosqueMarker(
     mapView: MapView,
-    mosqueLocation: GeoPoint,
+    mosqueInfo: MosqueInfo,
     userLocation: GeoPoint,
     context: Context
 ): Marker {
     return Marker(mapView).apply {
-        position = mosqueLocation
-        title = "Masjid"
+        position = mosqueInfo.geoPoint
+        title = mosqueInfo.name
 
-        val distance = userLocation.distanceToAsDouble(mosqueLocation)
-        snippet = "Jarak: ${String.format("%.0f", distance)} meter"
+        val distance = userLocation.distanceToAsDouble(mosqueInfo.geoPoint)
+        snippet = "Jarak: ${String.format("%.0f", distance)} meter\nID OSM: ${mosqueInfo.osmId}"
 
         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
 
         try {
-
             val originalDrawable = ContextCompat.getDrawable(context, R.drawable.mosquee_fill)
-
             if (originalDrawable != null) {
                 val iconSizePx =
                     (MapConstants.MARKER_SIZE_DP * context.resources.displayMetrics.density).toInt()
-                val finalSizePx = if (iconSizePx <= 0) 1 else iconSizePx
+                val finalSizePx = if (iconSizePx <= 0) MapConstants.MARKER_SIZE_DP else iconSizePx // Pastikan tidak 0 atau negatif
                 val bitmap = Bitmap.createBitmap(finalSizePx, finalSizePx, Bitmap.Config.ARGB_8888)
                 val canvas = Canvas(bitmap)
                 originalDrawable.setBounds(0, 0, canvas.width, canvas.height)
                 originalDrawable.draw(canvas)
                 icon = BitmapDrawable(context.resources, bitmap)
-
                 Log.d(
                     "MarkerDebug",
-                    "Mosque marker size set to: ${finalSizePx}px (target ${MapConstants.MARKER_SIZE_DP}dp)"
+                    "Mosque marker for '${mosqueInfo.name}' size set to: ${finalSizePx}px"
                 )
             } else {
-                Log.w(
-                    "MosqueScreen",
-                    "R.drawable.mosquee_fill is null, using default OSMDroid icon."
-                )
-                setIcon(ContextCompat.getDrawable(context, android.R.drawable.ic_menu_mapmode))
+                Log.w("MosqueScreen", "R.drawable.mosquee_fill is null for '${mosqueInfo.name}', using default.")
+                this.icon = ContextCompat.getDrawable(context, org.osmdroid.library.R.drawable.marker_default)
             }
         } catch (e: Exception) {
             Log.w(
                 "MosqueScreen",
-                "Could not load or resize mosque_fill icon, using default. Error: ${e.message}",
+                "Could not load or resize mosque_fill icon for '${mosqueInfo.name}', using default. Error: ${e.message}",
                 e
             )
             try {
-                setIcon(ContextCompat.getDrawable(context, android.R.drawable.ic_menu_mapmode))
+                this.icon = ContextCompat.getDrawable(context, org.osmdroid.library.R.drawable.marker_default)
             } catch (ex: Exception) {
-                Log.e("MarkerDebug", "Failed to set even fallback system icon", ex)
+                Log.e("MarkerDebug", "Failed to set even fallback system icon for '${mosqueInfo.name}'", ex)
             }
         }
     }
@@ -627,20 +613,36 @@ object LocationTrackingManager {
                 return
             }
 
-            // Try to get last known location first
-            val lastKnownLocation =
-                locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-                    ?: locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+            // Try to get last known location first (hanya jika belum ada listener aktif)
+            var hasReceivedInitialLocation = false
+            try {
+                val lastKnownLocationGPS = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                val lastKnownLocationNetwork = locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
 
-            lastKnownLocation?.let { location ->
-                val geoPoint = GeoPoint(location.latitude, location.longitude)
-                onLocationReceived(geoPoint)
-                Log.d("LocationTracking", "Using last known location: $geoPoint")
+                val bestLastKnownLocation = when {
+                    lastKnownLocationGPS != null && lastKnownLocationNetwork != null -> {
+                        if (lastKnownLocationGPS.time > lastKnownLocationNetwork.time) lastKnownLocationGPS else lastKnownLocationNetwork
+                    }
+                    lastKnownLocationGPS != null -> lastKnownLocationGPS
+                    lastKnownLocationNetwork != null -> lastKnownLocationNetwork
+                    else -> null
+                }
+
+                bestLastKnownLocation?.let { location ->
+                    val geoPoint = GeoPoint(location.latitude, location.longitude)
+                    onLocationReceived(geoPoint)
+                    hasReceivedInitialLocation = true
+                    Log.d("LocationTracking", "Using best last known location: $geoPoint from ${location.provider}")
+                }
+            } catch (se: SecurityException){
+                Log.e("LocationTrackingManager", "SecurityException on getLastKnownLocation", se)
+                onError("Izin lokasi diperlukan untuk mendapatkan lokasi terakhir.")
             }
 
-            val locationListener = createLocationListener(onLocationReceived, onError)
 
-            // Request updates
+            val locationListener = createLocationListener(onLocationReceived, onError, locationManager)
+            onListenerCreated(locationListener)
+
             if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
                 locationManager.requestLocationUpdates(
                     LocationManager.GPS_PROVIDER,
@@ -648,6 +650,7 @@ object LocationTrackingManager {
                     MapConstants.GPS_MIN_DISTANCE,
                     locationListener
                 )
+                Log.d("LocationTracking", "Requested GPS location updates.")
             }
 
             if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
@@ -657,45 +660,92 @@ object LocationTrackingManager {
                     MapConstants.NETWORK_MIN_DISTANCE,
                     locationListener
                 )
+                Log.d("LocationTracking", "Requested Network location updates.")
             }
 
-            onListenerCreated(locationListener)
-            Log.d("LocationTracking", "Real-time location tracking started")
+            if (!locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) && !locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                onError("Tidak ada provider lokasi yang aktif setelah mencoba meminta update.")
+                return
+            }
+
+            if(!hasReceivedInitialLocation && (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) || locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER))){
+                Log.d("LocationTracking", "No last known location, waiting for updates...")
+            }
+
+
+            Log.d("LocationTracking", "Real-time location tracking setup initiated.")
 
         } catch (e: SecurityException) {
-            onError("Izin lokasi tidak diberikan")
+            Log.e("LocationTrackingManager", "SecurityException during startTracking", e)
+            onError("Izin lokasi tidak diberikan atau dicabut.")
         } catch (e: Exception) {
+            Log.e("LocationTrackingManager", "Exception during startTracking", e)
             onError("Error memulai tracking lokasi: ${e.localizedMessage}")
         }
     }
 
     private fun createLocationListener(
         onLocationReceived: (GeoPoint) -> Unit,
-        onError: (String) -> Unit
+        onError: (String) -> Unit,
+        locationManager: LocationManager
     ): LocationListener {
         return object : LocationListener {
+            private var lastLocationTime: Long = 0
+            private val locationDebounceInterval = 1000L
+
             override fun onLocationChanged(location: Location) {
+                val currentTime = System.currentTimeMillis()
+                if (currentTime - lastLocationTime < locationDebounceInterval && location.provider == LocationManager.NETWORK_PROVIDER) {
+
+                }
+                lastLocationTime = currentTime
+
                 val geoPoint = GeoPoint(location.latitude, location.longitude)
                 onLocationReceived(geoPoint)
                 Log.d(
                     "LocationTracking",
-                    "Location updated: $geoPoint, Accuracy: ${location.accuracy}m"
+                    "Location updated from ${location.provider}: $geoPoint, Acc: ${location.accuracy}m, Time: ${location.time}"
                 )
             }
 
             override fun onProviderEnabled(provider: String) {
-                Log.d("LocationTracking", "Provider enabled: $provider")
+                Log.i("LocationTracking", "Provider enabled: $provider")
+                if (provider == LocationManager.GPS_PROVIDER) {
+                    try {
+                        locationManager.requestLocationUpdates(
+                            LocationManager.GPS_PROVIDER,
+                            MapConstants.LOCATION_UPDATE_INTERVAL,
+                            MapConstants.GPS_MIN_DISTANCE,
+                            this // listener ini sendiri
+                        )
+                        Log.i("LocationTracking", "Re-requested GPS updates as it was enabled.")
+                    } catch (se: SecurityException){
+                        Log.e("LocationTracking", "SecurityException re-requesting GPS on enable.", se)
+                    }
+                }
             }
 
             override fun onProviderDisabled(provider: String) {
-                Log.d("LocationTracking", "Provider disabled: $provider")
-                if (provider == LocationManager.GPS_PROVIDER) {
-                    onError("GPS dinonaktifkan. Menggunakan Network Provider.")
+                Log.w("LocationTracking", "Provider disabled: $provider")
+                val gpsEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+                val networkEnabled = locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+                if (!gpsEnabled && !networkEnabled) {
+                    onError("Semua provider lokasi (GPS & Network) nonaktif.")
+                } else if (provider == LocationManager.GPS_PROVIDER && networkEnabled) {
+                    Log.i("LocationTracking", "GPS disabled, Network provider is still active.")
+                } else if (provider == LocationManager.NETWORK_PROVIDER && gpsEnabled){
+                    Log.i("LocationTracking", "Network disabled, GPS provider is still active.")
                 }
             }
 
             override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {
-                Log.d("LocationTracking", "Provider status changed: $provider, Status: $status")
+                val statusString = when (status) {
+                    android.location.LocationProvider.AVAILABLE -> "AVAILABLE"
+                    android.location.LocationProvider.OUT_OF_SERVICE -> "OUT_OF_SERVICE"
+                    android.location.LocationProvider.TEMPORARILY_UNAVAILABLE -> "TEMPORARILY_UNAVAILABLE"
+                    else -> "UNKNOWN_STATUS ($status)"
+                }
+                Log.d("LocationTracking", "Provider status changed: $provider, Status: $statusString")
             }
         }
     }
@@ -705,9 +755,10 @@ object MosqueSearchManager {
     fun searchNearby(
         location: GeoPoint,
         radius: Int,
-        onSuccess: (List<GeoPoint>) -> Unit,
+        onSuccess: (List<MosqueInfo>) -> Unit, // DIUBAH: List<GeoPoint> -> List<MosqueInfo>
         onError: (String) -> Unit
     ) {
+        // Query Overpass API untuk mencari tempat ibadah muslim dengan tag nama
         val query = """
             [out:json][timeout:25];
             (
@@ -715,8 +766,8 @@ object MosqueSearchManager {
               way["amenity"="place_of_worship"]["religion"="muslim"](around:$radius,${location.latitude},${location.longitude});
               relation["amenity"="place_of_worship"]["religion"="muslim"](around:$radius,${location.latitude},${location.longitude});
             );
-            out center;
-        """.trimIndent()
+            out center tags; 
+        """.trimIndent() // 'out center tags;' untuk mendapatkan tags juga untuk way/relation
 
         val encodedQuery = try {
             URLEncoder.encode(query, "UTF-8")
@@ -734,55 +785,61 @@ object MosqueSearchManager {
 
     private fun performSearch(
         url: String,
-        onSuccess: (List<GeoPoint>) -> Unit,
+        onSuccess: (List<MosqueInfo>) -> Unit,
         onError: (String) -> Unit
     ) {
-        val client = OkHttpClient()
+        val client = OkHttpClient.Builder()
+            .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(25, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+
         val request = Request.Builder()
             .url(url)
-            .addHeader("User-Agent", "PrayFirst/1.0")
+            .addHeader("User-Agent", "NamaAplikasiAnda/1.0 (Android; Kontak: emailanda@example.com)") // User-Agent yang baik
             .build()
 
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                Log.e("MosqueSearch", "OkHttp onFailure", e)
+                Log.e("MosqueSearch", "OkHttp onFailure: ${e.message}", e)
                 CoroutineScope(Dispatchers.Main).launch {
-                    onError("Gagal terhubung ke server: ${e.localizedMessage}")
+                    onError("Gagal terhubung ke server pencarian: ${e.localizedMessage}")
                 }
             }
 
             override fun onResponse(call: Call, response: Response) {
                 response.use {
-                    if (!response.isSuccessful) {
-                        Log.e("MosqueSearch", "OkHttp onResponse unsuccessful: ${response.code}")
+                    val responseBodyString = it.body?.string() // Baca body sekali saja
+
+                    if (!it.isSuccessful) {
+                        Log.e("MosqueSearch", "OkHttp onResponse unsuccessful: ${it.code}. Body: $responseBodyString")
                         CoroutineScope(Dispatchers.Main).launch {
-                            onError("Error dari server: ${response.code} ${response.message}")
+                            onError("Error dari server pencarian: ${it.code} ${it.message}. Detail: ${responseBodyString?.take(200) ?: "No body"}")
                         }
                         return
                     }
 
-                    val jsonStr = response.body?.string()
-                    if (jsonStr.isNullOrEmpty()) {
+                    if (responseBodyString.isNullOrEmpty()) {
+                        Log.w("MosqueSearch", "Response body is null or empty.")
                         CoroutineScope(Dispatchers.Main).launch {
-                            onError("Tidak ada data diterima dari server.")
+                            onError("Tidak ada data diterima dari server pencarian.")
                         }
                         return
                     }
 
                     try {
-                        val mosques = parseMosqueData(jsonStr)
+                        val mosques = parseMosqueData(responseBodyString)
                         CoroutineScope(Dispatchers.Main).launch {
                             onSuccess(mosques)
                         }
                     } catch (e: JSONException) {
                         Log.e("MosqueSearch", "JSON Parsing error", e)
                         CoroutineScope(Dispatchers.Main).launch {
-                            onError("Gagal memproses data masjid: ${e.localizedMessage}")
+                            onError("Gagal memproses data masjid (Format JSON tidak valid): ${e.localizedMessage}")
                         }
                     } catch (e: Exception) {
-                        Log.e("MosqueSearch", "General error in onResponse", e)
+                        Log.e("MosqueSearch", "General error in onResponse post-processing", e)
                         CoroutineScope(Dispatchers.Main).launch {
-                            onError("Terjadi kesalahan: ${e.localizedMessage}")
+                            onError("Terjadi kesalahan saat memproses data masjid: ${e.localizedMessage}")
                         }
                     }
                 }
@@ -790,46 +847,57 @@ object MosqueSearchManager {
         })
     }
 
-    private fun parseMosqueData(json: String): List<GeoPoint> {
-        val mosques = mutableListOf<GeoPoint>()
+    private fun parseMosqueData(json: String): List<MosqueInfo> {
+        val mosques = mutableListOf<MosqueInfo>()
         val root = JSONObject(json)
         val elements = root.getJSONArray("elements")
 
         for (i in 0 until elements.length()) {
             val elem = elements.getJSONObject(i)
             val type = elem.getString("type")
+            val osmId = elem.getLong("id")
+
+            val tags = elem.optJSONObject("tags")
+            val name = tags?.optString("name", "Masjid (Tanpa Nama)")?.trim() ?: "Masjid (Tanpa Nama)"
+            val finalName = if (name.isEmpty()) "Masjid (Tanpa Nama)" else name
+
+
+            var lat: Double? = null
+            var lon: Double? = null
 
             when (type) {
                 "node" -> {
                     if (elem.has("lat") && elem.has("lon")) {
-                        val lat = elem.getDouble("lat")
-                        val lon = elem.getDouble("lon")
-                        mosques.add(GeoPoint(lat, lon))
+                        lat = elem.getDouble("lat")
+                        lon = elem.getDouble("lon")
                     }
                 }
-
                 "way", "relation" -> {
                     val center = elem.optJSONObject("center")
                     if (center != null && center.has("lat") && center.has("lon")) {
-                        val lat = center.getDouble("lat")
-                        val lon = center.getDouble("lon")
-                        mosques.add(GeoPoint(lat, lon))
+                        lat = center.getDouble("lat")
+                        lon = center.getDouble("lon")
                     } else {
                         val geometry = elem.optJSONArray("geometry")
                         if (geometry != null && geometry.length() > 0) {
-                            val firstPoint = geometry.getJSONObject(0)
+                            val firstPoint = geometry.getJSONObject(0) // Ambil titik pertama sebagai fallback
                             if (firstPoint.has("lat") && firstPoint.has("lon")) {
-                                val lat = firstPoint.getDouble("lat")
-                                val lon = firstPoint.getDouble("lon")
-                                mosques.add(GeoPoint(lat, lon))
+                                lat = firstPoint.getDouble("lat")
+                                lon = firstPoint.getDouble("lon")
+                                Log.w("MosqueSearch", "Using first geometry point for way/relation ID $osmId, Name: $finalName. 'center' object might be missing.")
                             }
                         }
                     }
                 }
             }
-        }
 
-        Log.d("MosqueSearch", "Parsed ${mosques.size} mosques")
+            if (lat != null && lon != null) {
+                mosques.add(MosqueInfo(GeoPoint(lat, lon), finalName, osmId))
+            } else {
+                Log.w("MosqueSearch", "Skipping element without valid coordinates. ID: $osmId, Name: $finalName, Type: $type")
+            }
+        }
+        Log.d("MosqueSearch", "Parsed ${mosques.size} mosques with names.")
         return mosques
     }
 }
